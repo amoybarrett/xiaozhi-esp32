@@ -1,0 +1,38 @@
+menu "Argus Volcano voice"
+
+config VOLC_WS_MODE
+    bool "Use the official ConversationalAI low-load WebSocket transport"
+    depends on BOARD_TYPE_ARGUS_K10
+    default y
+
+config VOLC_INSTANCE_ID
+    string "Volcano ConversationalAI instance ID"
+    depends on BOARD_TYPE_ARGUS_K10
+    default ""
+
+config VOLC_PRODUCT_KEY
+    string "Volcano ConversationalAI ProductKey"
+    depends on BOARD_TYPE_ARGUS_K10
+    default ""
+
+config VOLC_PRODUCT_SECRET
+    string "Volcano ConversationalAI ProductSecret"
+    depends on BOARD_TYPE_ARGUS_K10
+    default ""
+
+config VOLC_DEVICE_NAME
+    string "Volcano device serial number"
+    depends on BOARD_TYPE_ARGUS_K10
+    default "CN1510340039"
+
+config VOLC_BOT_ID
+    string "Volcano ConversationalAI bot ID"
+    depends on BOARD_TYPE_ARGUS_K10
+    default ""
+
+config VOLC_AUDIO_PCM16
+    bool "Use the low-load transport's official 16 kHz PCM16 audio"
+    depends on BOARD_TYPE_ARGUS_K10
+    default y
+
+endmenu

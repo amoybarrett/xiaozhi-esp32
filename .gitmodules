@@ -1,0 +1,4 @@
+[submodule "third_party/ConversationalAI-Embedded-Kit-2.0"]
+	path = third_party/ConversationalAI-Embedded-Kit-2.0
+	url = git@github.com:amoybarrett/ConversationalAI-Embedded-Kit-2.0.git
+	branch = argus/k10-idf6-compat

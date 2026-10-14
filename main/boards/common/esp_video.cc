@@ -888,6 +888,18 @@ bool EspVideo::Capture() {
     return true;
 }
 
+bool EspVideo::GetFrame(CameraFrame& frame) const {
+    if (frame_.data == nullptr || frame_.width == 0 || frame_.height == 0 || frame_.format == 0) {
+        return false;
+    }
+    frame.data = frame_.data;
+    frame.size = frame_.len;
+    frame.width = frame_.width;
+    frame.height = frame_.height;
+    frame.format = frame_.format;
+    return true;
+}
+
 bool EspVideo::SetHMirror(bool enabled) {
     if (video_fd_ < 0)
         return false;

@@ -1668,6 +1668,10 @@ def build_board(
         for item in sdkconfig_append:
             print(f"sdkconfig_append: {item}")
 
+        # Component dependency discovery runs before normal Kconfig variables
+        # are visible. Publish the selected variant so board-local components
+        # can be wired without making every board depend on them.
+        os.environ["XIAOZHI_BOARD_NAME"] = name
         _emit_build_stage("dependencies_resolving")
         os.environ.pop("IDF_TARGET", None)
         _prepare_target(target, preview)

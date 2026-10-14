@@ -91,7 +91,12 @@ set(EMOTE_RESOLUTION "320_240")
 
 # Select the board source directory from Kconfig
 # Set default assets if the board uses partition table V2
-if(CONFIG_BOARD_TYPE_BREAD_COMPACT_WIFI)
+if(CONFIG_BOARD_TYPE_ARGUS_K10)
+    set(BOARD_DIR "argus/k10")
+    set(BUILTIN_TEXT_FONT font_noto_sans_basic_20_4)
+    set(BUILTIN_ICON_FONT font_material_symbols_20_4)
+    set(DEFAULT_EMOJI_COLLECTION noto-color-emoji_128)
+elseif(CONFIG_BOARD_TYPE_BREAD_COMPACT_WIFI)
     set(BOARD_DIR "bread-compact-wifi")
     set(BUILTIN_TEXT_FONT font_noto_sans_basic_14_1)
     set(BUILTIN_ICON_FONT font_material_symbols_14_1)
@@ -1112,6 +1117,9 @@ if(CONFIG_BOARD_TYPE_ESP_VOCAT AND IDF_VERSION_MAJOR LESS 6)
         espressif__touch_slider_sensor
         espressif__touch_button_sensor
     )
+endif()
+if(ARGUS_BUILD OR "$ENV{XIAOZHI_BOARD_NAME}" STREQUAL "argus-k10")
+    list(APPEND MAIN_PRIV_REQUIRES_EXTRA argus_face argus_voice volc_conv_ai)
 endif()
 if(CONFIG_BOARD_TYPE_ESP32_P4_FUNCTION_EV_BOARD)
     list(APPEND MAIN_PRIV_REQUIRES_EXTRA
