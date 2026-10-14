@@ -796,8 +796,8 @@ bool EspVideo::Capture() {
                 color_format = LV_COLOR_FORMAT_RGB565;
                 data = (uint8_t*)heap_caps_malloc(w * h * 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
                 if (data == nullptr) {
-                    ESP_LOGE(TAG, "Failed to allocate memory for preview image");
-                    return false;
+                    ESP_LOGW(TAG, "Skip camera preview: no memory for color conversion");
+                    return true;
                 }
                 esp_imgfx_color_convert_cfg_t convert_cfg = {
                     .in_res = {.width = static_cast<int16_t>(frame_.width),
@@ -812,7 +812,7 @@ bool EspVideo::Capture() {
                     ESP_LOGE(TAG, "esp_imgfx_color_convert_open failed");
                     heap_caps_free(data);
                     data = nullptr;
-                    return false;
+                    return true;
                 }
                 esp_imgfx_data_t convert_input_data = {
                     .data = frame_.data,
@@ -830,7 +830,7 @@ bool EspVideo::Capture() {
                     data = nullptr;
                     esp_imgfx_color_convert_close(convert_handle);
                     convert_handle = nullptr;
-                    return false;
+                    return true;
                 }
                 esp_imgfx_color_convert_close(convert_handle);
                 convert_handle = nullptr;
@@ -841,8 +841,8 @@ bool EspVideo::Capture() {
             case V4L2_PIX_FMT_RGB565:
                 data = (uint8_t*)heap_caps_malloc(w * h * 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
                 if (data == nullptr) {
-                    ESP_LOGE(TAG, "Failed to allocate memory for preview image");
-                    return false;
+                    ESP_LOGW(TAG, "Skip camera preview: no memory for RGB565 copy");
+                    return true;
                 }
                 memcpy(data, frame_.data, frame_.len);
                 lvgl_image_size = frame_.len;  // fallthrough 时兼顾 YUYV 与 RGB565
