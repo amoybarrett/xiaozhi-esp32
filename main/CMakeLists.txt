@@ -1118,13 +1118,53 @@ if(CONFIG_BOARD_TYPE_ESP_VOCAT AND IDF_VERSION_MAJOR LESS 6)
         espressif__touch_button_sensor
     )
 endif()
-if(ARGUS_BUILD OR "$ENV{XIAOZHI_BOARD_NAME}" STREQUAL "argus-k10")
-    list(APPEND MAIN_PRIV_REQUIRES_EXTRA argus_face argus_voice volc_conv_ai)
-endif()
 if(CONFIG_BOARD_TYPE_ESP32_P4_FUNCTION_EV_BOARD)
     list(APPEND MAIN_PRIV_REQUIRES_EXTRA
         esp_driver_sdmmc
         sdmmc
+    )
+endif()
+set(ARGUS_SELECTED_BOARD_NAME "")
+set(ARGUS_BOARD_NAME_FILE "${CMAKE_BINARY_DIR}/xiaozhi-board-name")
+if(EXISTS "${ARGUS_BOARD_NAME_FILE}")
+    file(READ "${ARGUS_BOARD_NAME_FILE}" ARGUS_SELECTED_BOARD_NAME)
+    string(STRIP "${ARGUS_SELECTED_BOARD_NAME}" ARGUS_SELECTED_BOARD_NAME)
+endif()
+if(ARGUS_SELECTED_BOARD_NAME STREQUAL "argus-k10" OR CONFIG_BOARD_TYPE_ARGUS_K10)
+    # The canonical build script writes the selected variant into build/ before
+    # IDF 6 early dependency expansion; a newly parsed Kconfig symbol is not yet
+    # visible there.
+    list(APPEND MAIN_PRIV_REQUIRES_EXTRA
+        nvs_flash
+        spiffs
+        esp_http_client
+        espressif__esp_video
+        espressif__human_face_detect
+        espressif__human_face_recognition
+        espressif__esp_audio_effects
+        espressif__cjson
+        lwip
+        esp_hw_support
+        esp_rom
+    )
+endif()
+if(CONFIG_BOARD_TYPE_ARGUS_K10)
+    set(ARGUS_VOLC_ROOT
+        "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/ConversationalAI-Embedded-Kit-2.0/volc_conv_ai")
+    include("${ARGUS_VOLC_ROOT}/cmake/common.cmake")
+    list(APPEND SOURCES
+        "boards/argus/face/src/argus_face_attendance.cc"
+        "boards/argus/voice/src/argus_voice_service.cc"
+        "${ARGUS_VOLC_ROOT}/osal/src/espressif/volc_osal.c"
+        ${VOLC_CONV_AI_SRCS}
+        ${VOLC_CONV_AI_LOW_LOAD_SRCS}
+    )
+    list(APPEND INCLUDE_DIRS
+        "boards/argus/face/include"
+        "boards/argus/voice/include"
+        ${VOLC_CONV_AI_INCS}
+        ${VOLC_CONV_AI_LOW_LOAD_INCS}
+        ${VOLC_CONV_AI_PLATFORM_INCS}
     )
 endif()
 idf_component_register(SRCS ${SOURCES}
@@ -1156,6 +1196,12 @@ idf_component_register(SRCS ${SOURCES}
                         xiaozhi-fonts
                         ${MAIN_PRIV_REQUIRES_EXTRA}
                     )
+
+if(CONFIG_BOARD_TYPE_ARGUS_K10)
+    set_source_files_properties(${VOLC_CONV_AI_SRCS} ${VOLC_CONV_AI_LOW_LOAD_SRCS}
+        PROPERTIES COMPILE_OPTIONS "-w")
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE ENABLE_WS_MODE)
+endif()
 
 # Keep project-owned C++ on GNU C++23. ESP-IDF 6 may default to a newer
 # dialect; pin the baseline so main/ does not depend on it.

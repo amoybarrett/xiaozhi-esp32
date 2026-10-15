@@ -121,6 +121,45 @@ choice
         bool "Serbian"
 endchoice
 
+menu "Argus Volcano voice"
+
+config VOLC_WS_MODE
+    bool "Use the official ConversationalAI low-load WebSocket transport"
+    depends on BOARD_TYPE_ARGUS_K10
+    default y
+
+config VOLC_INSTANCE_ID
+    string "Volcano ConversationalAI instance ID"
+    depends on BOARD_TYPE_ARGUS_K10
+    default ""
+
+config VOLC_PRODUCT_KEY
+    string "Volcano ConversationalAI ProductKey"
+    depends on BOARD_TYPE_ARGUS_K10
+    default ""
+
+config VOLC_PRODUCT_SECRET
+    string "Volcano ConversationalAI ProductSecret"
+    depends on BOARD_TYPE_ARGUS_K10
+    default ""
+
+config VOLC_DEVICE_NAME
+    string "Volcano device serial number"
+    depends on BOARD_TYPE_ARGUS_K10
+    default "CN1510340039"
+
+config VOLC_BOT_ID
+    string "Volcano ConversationalAI bot ID"
+    depends on BOARD_TYPE_ARGUS_K10
+    default ""
+
+config VOLC_AUDIO_PCM16
+    bool
+    depends on BOARD_TYPE_ARGUS_K10
+    default y
+
+endmenu
+
 choice BOARD_TYPE
     prompt "Target Board"
     default BOARD_TYPE_BREAD_COMPACT_ESP32 if IDF_TARGET_ESP32
@@ -134,9 +173,6 @@ choice BOARD_TYPE
         Select the physical board hardware implementation.
         The OTA board type and firmware variant name are configured separately.
 
-    config BOARD_TYPE_ARGUS_K10
-        bool "Argus UNIHIKER K10 attendance/intercom"
-        depends on IDF_TARGET_ESP32S3
     config BOARD_TYPE_ATK_DNESP32S3
         bool "Alientek ATK-DNESP32S3 Development Board (正点原子)"
         depends on IDF_TARGET_ESP32S3
@@ -160,6 +196,9 @@ choice BOARD_TYPE
         depends on IDF_TARGET_ESP32S3
     config BOARD_TYPE_ATK_DNESP32S3M_WIFI
         bool "Alientek ATK-DNESP32S3M Wi-Fi (正点原子)"
+        depends on IDF_TARGET_ESP32S3
+    config BOARD_TYPE_ARGUS_K10
+        bool "Argus UNIHIKER K10 attendance/intercom"
         depends on IDF_TARGET_ESP32S3
     config BOARD_TYPE_BREAD_COMPACT_ESP32
         bool "Bread Compact ESP32 DevKit (面包板)"

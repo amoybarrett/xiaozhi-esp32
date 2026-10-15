@@ -9,8 +9,8 @@ UNIHIKER K10 hardware. It intentionally does not replace the stock
 * SoC: ESP32-S3
 * Camera: GC2145
 * Display: ILI9341, 240x320
-* Buttons: A/B (double-click B toggles Volcano intercom)
-* Audio: 24 kHz duplex audio
+* Buttons: A/B (double-click either button toggles Volcano intercom)
+* Audio: 24 kHz device audio; first-generation Volcano mode is half-duplex
 
 ## Build
 

@@ -43,7 +43,8 @@ public:
     bool EnrollNextFace(const std::string& person_id);
     bool ClearAll();
     int GetEnrolledCount();
-    void SetBridgeInfo(const std::string& base_url, const std::string& token, const std::string& device_id);
+    void SetBridgeInfo(const std::string& base_url, const std::string& token,
+                       const std::string& device_id);
 
 private:
     struct Impl;

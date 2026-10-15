@@ -19,8 +19,15 @@ mistaken for stock Xiaozhi releases.
   - `argus.voice.start`
   - `argus.voice.stop`
 
-Button A retains Xiaozhi's wake/chat behavior. Button B retains short/long
-volume behavior; **double-click B** starts or stops the Volcano intercom.
+Button A retains Xiaozhi's single-click wake/chat behavior. Button B retains
+short/long volume behavior. **Double-click either A or B** starts or stops the
+Volcano intercom, avoiding dependence on the K10 silkscreen/button-channel
+naming.
+
+The Volcano transport runs half-duplex on this first-generation build: while
+the cloud agent is speaking, microphone upload is paused to avoid the device
+hearing its own speaker. Attendance scanning and its face models are also
+released while the intercom is active, then reloaded after the intercom stops.
 
 ## Build
 
@@ -33,6 +40,21 @@ The build includes the official ConversationalAI Embedded Kit 2.0 submodule and
 uses its low-load WebSocket transport with 16 kHz PCM16 audio. It does not link
 the high-quality RTC Lite library. The Argus partition table keeps large OTA
 slots for Xiaozhi assets and the face models.
+
+The canonical build command also writes a generated board marker for ESP-IDF 6's
+early dependency-discovery phase. Volcano credential values are carried between
+ignored local `sdkconfig` generations, so rebuilding or switching back from a
+stock board does not silently clear them.
+
+## Validation status
+
+- Argus K10 and a representative stock ESP32-S3 camera board both build with
+  ESP-IDF 6.1.
+- The stock build contains no Argus/Volcano symbols or credentials.
+- Final K10 startup completes camera, face-database, audio, MCP tool, and Wi-Fi
+  initialization with about 76 KB internal SRAM free while idle.
+- End-to-end Volcano speech requires the device to see a saved 2.4 GHz AP. If no
+  AP is visible, it remains in normal Xiaozhi provisioning/connection behavior.
 
 ## Wi-Fi
 

@@ -33,6 +33,7 @@ public:
 
 private:
     void InputTask();
+    void PlaybackTask();
 
     struct Impl;
     Impl* impl_;

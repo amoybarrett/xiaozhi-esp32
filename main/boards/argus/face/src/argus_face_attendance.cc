@@ -24,8 +24,8 @@
 #include <cstring>
 #include <ctime>
 #include <memory>
-#include <unordered_map>
 #include <string>
+#include <unordered_map>
 
 namespace argus {
 namespace {
@@ -146,13 +146,13 @@ bool FaceAttendance::Start() {
         return true;
     }
 
-    if (xTaskCreate([](void* arg) { static_cast<Impl*>(arg)->RunWorker(); }, "argus_face", 12288, impl_, 4,
-                    &impl_->worker) != pdPASS) {
+    if (xTaskCreate([](void* arg) { static_cast<Impl*>(arg)->RunWorker(); }, "argus_face", 12288,
+                    impl_, 4, &impl_->worker) != pdPASS) {
         impl_->running = false;
         return false;
     }
-    if (xTaskCreate([](void* arg) { static_cast<Impl*>(arg)->RunUploader(); }, "argus_upload", 6144, impl_, 3,
-                    &impl_->uploader) != pdPASS) {
+    if (xTaskCreate([](void* arg) { static_cast<Impl*>(arg)->RunUploader(); }, "argus_upload", 6144,
+                    impl_, 3, &impl_->uploader) != pdPASS) {
         Stop();
         return false;
     }
@@ -293,8 +293,10 @@ void FaceAttendance::Impl::RunUploader() {
 
         char payload[512] = {};
         std::snprintf(payload, sizeof(payload),
-                      "{\"event_id\":\"%s\",\"person_id\":\"%s\",\"device_id\":\"%s\",\"timestamp\":\"%s\",\"kind\":\"check_in\",\"confidence\":%.3f}",
-                      event.event_id, event.person_id, event.device_id, event.timestamp, event.similarity);
+                      "{\"event_id\":\"%s\",\"person_id\":\"%s\",\"device_id\":\"%s\","
+                      "\"timestamp\":\"%s\",\"kind\":\"check_in\",\"confidence\":%.3f}",
+                      event.event_id, event.person_id, event.device_id, event.timestamp,
+                      event.similarity);
         char auth[160] = {};
         std::snprintf(auth, sizeof(auth), "Bearer %s", token.c_str());
 
@@ -336,10 +338,24 @@ void FaceAttendance::Stop() {
     impl_->running = false;
     xSemaphoreGive(impl_->mutex);
 
-    for (int i = 0; i < 100 && (impl_->worker != nullptr || impl_->uploader != nullptr); ++i) {
+    int wait_iterations = 0;
+    while (impl_->worker != nullptr || impl_->uploader != nullptr) {
+        if (++wait_iterations == 100) {
+            ESP_LOGW(kTag, "Waiting for face attendance tasks to finish");
+        }
         vTaskDelay(pdMS_TO_TICKS(20));
     }
+    xSemaphoreTake(impl_->mutex, portMAX_DELAY);
+    impl_->last_seen.clear();
+    impl_->pending_person.clear();
+    impl_->detector.reset();
+    impl_->recognizer.reset();
+    xSemaphoreGive(impl_->mutex);
+    if (impl_->event_queue != nullptr) {
+        xQueueReset(impl_->event_queue);
+    }
     esp_vfs_spiffs_unregister(kStoragePartition);
+    ESP_LOGI(kTag, "Local face attendance stopped and models released");
 }
 
 bool FaceAttendance::EnrollNextFace(const std::string& person_id) {
@@ -357,7 +373,8 @@ bool FaceAttendance::EnrollNextFace(const std::string& person_id) {
 
 bool FaceAttendance::ClearAll() {
     xSemaphoreTake(impl_->mutex, portMAX_DELAY);
-    const bool success = impl_->recognizer != nullptr && impl_->recognizer->clear_all_feats() == ESP_OK;
+    const bool success =
+        impl_->recognizer != nullptr && impl_->recognizer->clear_all_feats() == ESP_OK;
     xSemaphoreGive(impl_->mutex);
     if (!success) {
         return false;
@@ -381,7 +398,8 @@ int FaceAttendance::GetEnrolledCount() {
 void FaceAttendance::SetBridgeInfo(const std::string& base_url, const std::string& token,
                                    const std::string& device_id) {
     if (device_id.empty() || !IsValidPersonId(device_id) ||
-        device_id.size() >= sizeof(AttendanceEvent::device_id)) {
+        device_id.size() >= sizeof(AttendanceEvent::device_id) || token.size() >= 128 ||
+        base_url.size() >= 256) {
         return;
     }
     xSemaphoreTake(impl_->mutex, portMAX_DELAY);
