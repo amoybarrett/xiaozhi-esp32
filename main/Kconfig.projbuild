@@ -123,9 +123,26 @@ endchoice
 
 menu "Argus Volcano voice"
 
-config VOLC_WS_MODE
-    bool "Use the official ConversationalAI low-load WebSocket transport"
+choice VOLC_TRANSPORT_MODE
+    prompt "Volcano ConversationalAI transport"
     depends on BOARD_TYPE_ARGUS_K10
+
+    config VOLC_WS_MODE
+        bool "Official low-load WebSocket transport"
+
+    config VOLC_RTC_MODE
+        bool "Official high-quality RTC transport"
+
+endchoice
+
+config VOLC_AUDIO_PCM16
+    bool
+    depends on VOLC_WS_MODE
+    default y
+
+config VOLC_AUDIO_G711A
+    bool
+    depends on VOLC_RTC_MODE
     default y
 
 config VOLC_INSTANCE_ID

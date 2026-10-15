@@ -56,6 +56,19 @@ stock board does not silently clear them.
 - End-to-end Volcano speech requires the device to see a saved 2.4 GHz AP. If no
   AP is visible, it remains in normal Xiaozhi provisioning/connection behavior.
 
+## Experimental RTC branch
+
+`argus/k10-v2.5.2-rtc-test` links Volcano RTC Lite with G.711A and an
+experimental 16 MB partition table. RTC Lite adds about 205 KiB to each OTA
+slot, so the test layout reduces the local face-database partition from 1.3 MiB
+to 832 KiB. It is not production-ready.
+
+On ESP-IDF 6.1, initial runtime tests reached device registration and RTC config
+fetch, then triggered a TLS heap assertion in the prebuilt RTC Lite network
+stack. The branch retains the failed experiment for comparison and debugging;
+the main `argus/k10-v2.5.2` branch remains on the stable low-load WebSocket
+transport.
+
 ## Wi-Fi
 
 Do not hard-code Wi-Fi credentials. On first boot, the device starts normal

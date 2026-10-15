@@ -188,7 +188,7 @@ void ArgusK10AudioCodec::EnableOutput(bool enable) {
     if (enable == output_enabled_) {
         return;
     }
-    AudioCodec::SetOutputVolume(output_volume_);
+    // AudioCodec::Start() has already loaded the persisted volume. Do not write NVS here.
     AudioCodec::EnableOutput(enable);
 }
 

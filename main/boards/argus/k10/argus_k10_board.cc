@@ -17,6 +17,7 @@
 
 #include <driver/i2c_master.h>
 #include <driver/spi_common.h>
+#include <esp_heap_caps.h>
 #include <esp_idf_version.h>
 #include <esp_lcd_panel_vendor.h>
 #include <esp_log.h>
@@ -449,6 +450,12 @@ private:
     void RunVoiceControl(bool start) {
         auto* codec = GetAudioCodec();
         if (start) {
+#if CONFIG_VOLC_RTC_MODE
+            // RTC Lite needs additional internal memory. Temporarily release
+            // Xiaozhi's MQTT/TLS protocol before creating the RTC engine.
+            Application::GetInstance().ResetProtocol();
+            vTaskDelay(pdMS_TO_TICKS(1000));
+#endif
             if (face_attendance_ != nullptr) {
                 face_attendance_->Stop();
             }
@@ -498,15 +505,17 @@ private:
             bool start;
         };
         auto* command = new Command{this, start};
-        if (xTaskCreate(
+        if (xTaskCreateWithCaps(
                 [](void* arg) {
                     auto* item = static_cast<Command*>(arg);
                     item->board->RunVoiceControl(item->start);
                     item->board->voice_control_busy_.store(false);
                     delete item;
-                    vTaskDelete(nullptr);
+                    vTaskDeleteWithCaps(nullptr);
                 },
-                "argus_voice_ctl", 8192, command, 4, nullptr) != pdPASS) {
+                "argus_voice_ctl", 8192, command, 4, nullptr,
+                MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
+            ESP_LOGE(TAG, "Failed to create the voice control task");
             voice_control_busy_.store(false);
             delete command;
             return false;

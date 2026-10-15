@@ -8,6 +8,10 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/stream_buffer.h>
 #include <freertos/task.h>
+#include "decoder/esp_audio_dec.h"
+#include "decoder/impl/esp_g711_dec.h"
+#include "encoder/esp_audio_enc.h"
+#include "encoder/impl/esp_g711_enc.h"
 #include "esp_ae_rate_cvt.h"
 
 #include <algorithm>
@@ -17,12 +21,22 @@
 namespace argus {
 namespace {
 
+#if CONFIG_VOLC_RTC_MODE
+static_assert(CONFIG_VOLC_AUDIO_G711A,
+              "Argus RTC voice requires the official G.711A high-quality path");
+constexpr int kCloudSampleRate = 8000;
+constexpr int kFrameMs = 60;
+constexpr const char* kTransportName = "high-quality RTC";
+#else
 static_assert(CONFIG_VOLC_WS_MODE && CONFIG_VOLC_AUDIO_PCM16,
-              "Argus voice currently supports only the official low-load WebSocket PCM16 path");
+              "Argus voice requires the official low-load WebSocket PCM16 path");
+constexpr int kCloudSampleRate = 16000;
+constexpr int kFrameMs = 100;
+constexpr const char* kTransportName = "low-load WebSocket";
+#endif
 constexpr const char* kTag = "argus-voice";
-constexpr int kPcmSampleRate = 16000;
-constexpr int kFrameSamples = 1600;         // 100 ms, the officially demonstrated low-load cadence.
-constexpr int kPlaybackInputSamples = 960;  // 60 ms at 16 kHz, matching Xiaozhi playback.
+constexpr int kFrameSamples = kCloudSampleRate * kFrameMs / 1000;
+constexpr int kPlaybackInputSamples = kCloudSampleRate * kFrameMs / 1000;
 constexpr size_t kPlaybackBufferSize = 64 * 1024;
 constexpr int kResumeQuietPolls = 5;
 
@@ -65,6 +79,10 @@ struct VoiceService::Impl {
     StaticStreamBuffer_t playback_stream_storage{};
     uint8_t* playback_buffer = nullptr;
     esp_ae_rate_cvt_handle_t output_resampler = nullptr;
+    void* g711_encoder = nullptr;
+    void* g711_decoder = nullptr;
+    std::vector<uint8_t> encoded;
+    std::vector<int16_t> decoded;
     std::atomic<bool> connected{false};
     std::atomic<bool> input_allowed{true};
     std::atomic<bool> answer_finished{false};
@@ -79,6 +97,103 @@ struct VoiceService::Impl {
         }
         esp_ae_rate_cvt_close(output_resampler);
         output_resampler = nullptr;
+    }
+
+    void CloseCloudCodec() {
+#if CONFIG_VOLC_RTC_MODE
+        if (g711_encoder != nullptr) {
+            esp_g711_enc_close(g711_encoder);
+            g711_encoder = nullptr;
+        }
+        if (g711_decoder != nullptr) {
+            esp_g711_dec_close(g711_decoder);
+            g711_decoder = nullptr;
+        }
+#endif
+    }
+
+    bool OpenCloudCodec() {
+#if CONFIG_VOLC_RTC_MODE
+        esp_g711_enc_config_t encoder_config = {
+            .sample_rate = kCloudSampleRate,
+            .channel = 1,
+            .bits_per_sample = 16,
+            .frame_duration = kFrameMs,
+        };
+        if (esp_g711a_enc_open(&encoder_config, sizeof(encoder_config), &g711_encoder) !=
+            ESP_AUDIO_ERR_OK) {
+            CloseCloudCodec();
+            return false;
+        }
+        esp_g711_dec_cfg_t decoder_config = {.channel = 1};
+        if (esp_g711_dec_open(&decoder_config, sizeof(decoder_config), &g711_decoder) !=
+            ESP_AUDIO_ERR_OK) {
+            CloseCloudCodec();
+            return false;
+        }
+#endif
+        return true;
+    }
+
+    bool EncodeG711A(const std::vector<int16_t>& input) {
+#if CONFIG_VOLC_RTC_MODE
+        if (input.empty() || g711_encoder == nullptr) {
+            return false;
+        }
+        encoded.resize(input.size());
+        esp_audio_enc_in_frame_t in_frame = {
+            .buffer = reinterpret_cast<uint8_t*>(const_cast<int16_t*>(input.data())),
+            .len = static_cast<uint32_t>(input.size() * sizeof(int16_t)),
+        };
+        esp_audio_enc_out_frame_t out_frame = {
+            .buffer = encoded.data(),
+            .len = static_cast<uint32_t>(encoded.size()),
+        };
+        if (esp_g711_enc_process(g711_encoder, &in_frame, &out_frame) != ESP_AUDIO_ERR_OK ||
+            out_frame.encoded_bytes == 0 || out_frame.encoded_bytes > encoded.size()) {
+            return false;
+        }
+        encoded.resize(out_frame.encoded_bytes);
+        return true;
+#else
+        (void)input;
+        return false;
+#endif
+    }
+
+    bool DecodeG711A(const uint8_t* input, size_t size) {
+#if CONFIG_VOLC_RTC_MODE
+        if (input == nullptr || size == 0 || g711_decoder == nullptr) {
+            return false;
+        }
+        decoded.resize(size);
+        esp_audio_dec_in_raw_t raw = {
+            .buffer = const_cast<uint8_t*>(input),
+            .len = static_cast<uint32_t>(size),
+        };
+        size_t decoded_bytes = 0;
+        while (raw.len > 0 && decoded_bytes < decoded.size() * sizeof(int16_t)) {
+            uint8_t* output = reinterpret_cast<uint8_t*>(decoded.data()) + decoded_bytes;
+            esp_audio_dec_out_frame_t frame = {
+                .buffer = output,
+                .len = static_cast<uint32_t>(decoded.size() * sizeof(int16_t) - decoded_bytes),
+            };
+            esp_audio_dec_info_t info = {};
+            if (esp_g711a_dec_decode(g711_decoder, &raw, &frame, &info) != ESP_AUDIO_ERR_OK ||
+                raw.consumed == 0) {
+                return false;
+            }
+            raw.buffer += raw.consumed;
+            raw.len -= raw.consumed;
+            decoded_bytes += frame.decoded_size;
+        }
+        decoded.resize(decoded_bytes / sizeof(int16_t));
+        return !decoded.empty();
+#else
+        (void)input;
+        (void)size;
+        return false;
+#endif
     }
 
     bool WritePlaybackChunk(std::vector<int16_t>& input, std::vector<int16_t>& output) {
@@ -165,9 +280,13 @@ bool VoiceService::Start(AudioSource* source, AudioSink* sink) {
     impl_->received_audio_frames.store(0);
     impl_->dropped_audio_chunks.store(0);
     impl_->CloseOutputResampler();
-    if (impl_->sink->sample_rate() != kPcmSampleRate) {
+    if (!impl_->OpenCloudCodec()) {
+        ESP_LOGE(kTag, "Failed to create the Volcano cloud audio codec");
+        return false;
+    }
+    if (impl_->sink->sample_rate() != kCloudSampleRate) {
         esp_ae_rate_cvt_cfg_t config = {
-            .src_rate = static_cast<uint32_t>(kPcmSampleRate),
+            .src_rate = static_cast<uint32_t>(kCloudSampleRate),
             .dest_rate = static_cast<uint32_t>(impl_->sink->sample_rate()),
             .channel = 1,
             .bits_per_sample = 16,
@@ -177,11 +296,13 @@ bool VoiceService::Start(AudioSource* source, AudioSink* sink) {
         if (esp_ae_rate_cvt_open(&config, &impl_->output_resampler) != ESP_AE_ERR_OK) {
             ESP_LOGE(kTag, "Failed to create Volcano output resampler");
             impl_->CloseOutputResampler();
+            impl_->CloseCloudCodec();
             return false;
         }
     }
     if (!impl_->OpenPlaybackStream()) {
         ESP_LOGE(kTag, "Failed to create the PSRAM Volcano playback stream");
+        impl_->CloseCloudCodec();
         impl_->CloseOutputResampler();
         return false;
     }
@@ -194,18 +315,18 @@ bool VoiceService::Start(AudioSource* source, AudioSink* sink) {
                 }
                 if (event->code == VOLC_EV_CONNECTED) {
                     impl->connected.store(true);
-                    // The low-load SDK does not emit an initial LISTENING
-                    // status for a new session; its initial state is listening.
+                    // The SDK does not emit an initial LISTENING status for a
+                    // new session; its initial state is listening.
                     impl->answer_finished.store(false);
                     impl->quiet_input_polls.store(0);
                     impl->input_allowed.store(true);
-                    ESP_LOGI(kTag, "Volcano low-load WebSocket connected");
+                    ESP_LOGI(kTag, "Volcano %s connected", kTransportName);
                 } else if (event->code == VOLC_EV_DISCONNECTED) {
                     impl->connected.store(false);
                     impl->input_allowed.store(false);
                     impl->answer_finished.store(false);
                     impl->quiet_input_polls.store(0);
-                    ESP_LOGW(kTag, "Volcano low-load WebSocket disconnected");
+                    ESP_LOGW(kTag, "Volcano %s disconnected", kTransportName);
                 }
             },
         .on_volc_conversation_status =
@@ -254,15 +375,31 @@ bool VoiceService::Start(AudioSource* source, AudioSink* sink) {
                          static_cast<int>(status));
             },
         .on_volc_audio_data =
-            [](volc_engine_t, const void* data, size_t size, volc_audio_frame_info_t*,
+            [](volc_engine_t, const void* data, size_t size, volc_audio_frame_info_t* info,
                void* user_data) {
                 auto* impl = static_cast<Impl*>(user_data);
                 if (impl == nullptr || impl->sink == nullptr || data == nullptr ||
-                    impl->playback_stream == nullptr || (size & 1U) != 0U) {
+                    impl->playback_stream == nullptr) {
                     return;
                 }
-                const size_t sent = xStreamBufferSend(impl->playback_stream, data, size, 0);
-                if (sent != size) {
+#if CONFIG_VOLC_RTC_MODE
+                if (info == nullptr || info->data_type != VOLC_AUDIO_DATA_TYPE_G711A ||
+                    !impl->DecodeG711A(static_cast<const uint8_t*>(data), size)) {
+                    return;
+                }
+                const void* playback_data = impl->decoded.data();
+                const size_t playback_size = impl->decoded.size() * sizeof(int16_t);
+#else
+                if (info == nullptr || info->data_type != VOLC_AUDIO_DATA_TYPE_PCM ||
+                    (size & 1U) != 0U) {
+                    return;
+                }
+                const void* playback_data = data;
+                const size_t playback_size = size;
+#endif
+                const size_t sent =
+                    xStreamBufferSend(impl->playback_stream, playback_data, playback_size, 0);
+                if (sent != playback_size) {
                     const uint32_t drops = ++impl->dropped_audio_chunks;
                     if (drops == 1) {
                         ESP_LOGW(kTag, "Volcano playback stream is full");
@@ -285,28 +422,60 @@ bool VoiceService::Start(AudioSource* source, AudioSink* sink) {
                                    void*) {},
     };
 
-    const std::string config = std::string("{\"ver\":1,\"iot\":{\"instance_id\":\"") +
-                               CONFIG_VOLC_INSTANCE_ID + "\",\"product_key\":\"" +
-                               CONFIG_VOLC_PRODUCT_KEY + "\",\"product_secret\":\"" +
-                               CONFIG_VOLC_PRODUCT_SECRET + "\",\"device_name\":\"" +
-                               CONFIG_VOLC_DEVICE_NAME + "\"},\"ws\":{\"audio\":{\"codec\":4}}}";
+    const std::string iot_config = std::string("{\"instance_id\":\"") + CONFIG_VOLC_INSTANCE_ID +
+                                   "\",\"product_key\":\"" + CONFIG_VOLC_PRODUCT_KEY +
+                                   "\",\"product_secret\":\"" + CONFIG_VOLC_PRODUCT_SECRET +
+                                   "\",\"device_name\":\"" + CONFIG_VOLC_DEVICE_NAME + "\"}";
+#if CONFIG_VOLC_RTC_MODE
+    const std::string config =
+        std::string("{\"ver\":1,\"iot\":") + iot_config +
+        ",\"rtc\":{\"log_level\":2,\"audio\":{\"publish\":true,\"subscribe\":true,"
+        "\"codec\":3},\"video\":{\"publish\":false,\"subscribe\":false,\"codec\":1},"
+        "\"params\":["
+        "\"{\\\"rtc\\\":{\\\"access\\\":{\\\"concurrent_requests\\\":1}}}\","
+        "\"{\\\"rtc\\\":{\\\"ice\\\":{\\\"concurrent_agents\\\":1}}}\","
+        "\"{\\\"rtc\\\":{\\\"thread\\\":{\\\"stack_in_ext\\\":1}}}\","
+        "\"{\\\"rtc\\\":{\\\"network\\\":{\\\"enable_audio_jitter2\\\":0}}}\","
+        "\"{\\\"rtc\\\":{\\\"report\\\":{\\\"enable\\\":0}}}\","
+        "\"{\\\"audio\\\":{\\\"codec\\\":{\\\"pcma\\\":{\\\"s_samples_per_frame\\\":" +
+        std::to_string(kFrameSamples) + "}}}}}\"]}}";
+#else
+    const std::string config =
+        std::string("{\"ver\":1,\"iot\":") + iot_config + ",\"ws\":{\"audio\":{\"codec\":4}}}";
+#endif
 
+    ESP_LOGI(kTag, "Creating Volcano engine; internal free=%u largest=%u, PSRAM free=%u largest=%u",
+             static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL)),
+             static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL)),
+             static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)),
+             static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM)));
     if (volc_create(&impl_->engine, config.c_str(), &impl_->handler, impl_) != 0) {
-        ESP_LOGE(kTag, "Failed to create Volcano low-load engine");
+        ESP_LOGE(kTag, "Failed to create the Volcano %s engine", kTransportName);
         impl_->engine = nullptr;
+        impl_->CloseCloudCodec();
         impl_->CloseOutputResampler();
         impl_->ClosePlaybackStream();
         return false;
     }
+    ESP_LOGI(kTag, "Volcano engine created; internal free=%u largest=%u, PSRAM free=%u largest=%u",
+             static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL)),
+             static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL)),
+             static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)),
+             static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM)));
     volc_opt_t option = {
+#if CONFIG_VOLC_RTC_MODE
+        .mode = VOLC_MODE_RTC,
+#else
         .mode = VOLC_MODE_WS,
+#endif
         .bot_id = const_cast<char*>(CONFIG_VOLC_BOT_ID),
         .params = nullptr,
     };
     if (volc_start(impl_->engine, &option) != 0) {
-        ESP_LOGE(kTag, "Failed to start Volcano low-load conversation");
+        ESP_LOGE(kTag, "Failed to start the Volcano %s conversation", kTransportName);
         volc_destroy(impl_->engine);
         impl_->engine = nullptr;
+        impl_->CloseCloudCodec();
         impl_->CloseOutputResampler();
         impl_->ClosePlaybackStream();
         return false;
@@ -325,14 +494,14 @@ bool VoiceService::Start(AudioSource* source, AudioSink* sink) {
         Stop();
         return false;
     }
-    ESP_LOGI(kTag, "Volcano low-load intercom started (%s)", volc_get_version());
+    ESP_LOGI(kTag, "Volcano %s intercom started (%s)", kTransportName, volc_get_version());
     return true;
 }
 
 void VoiceService::InputTask() {
     const int channels = std::max(1, impl_->source->channels());
     const size_t input_samples = static_cast<size_t>(kFrameSamples * impl_->source->sample_rate() /
-                                                     kPcmSampleRate * channels);
+                                                     kCloudSampleRate * channels);
     std::vector<int16_t> input;
     std::vector<int16_t> mono;
     std::vector<int16_t> pcm;
@@ -375,13 +544,24 @@ void VoiceService::InputTask() {
         for (size_t i = 0; i + channels <= input.size(); i += channels) {
             mono.push_back(input[i]);
         }
-        Resample(mono, impl_->source->sample_rate(), kPcmSampleRate, pcm);
+        Resample(mono, impl_->source->sample_rate(), kCloudSampleRate, pcm);
+#if CONFIG_VOLC_RTC_MODE
+        if (!impl_->EncodeG711A(pcm)) {
+            continue;
+        }
+        volc_audio_frame_info_t frame = {
+            .data_type = VOLC_AUDIO_DATA_TYPE_G711A,
+            .commit = false,
+        };
+        volc_send_audio_data(impl_->engine, impl_->encoded.data(), impl_->encoded.size(), &frame);
+#else
         const size_t count = std::min(pcm.size(), static_cast<size_t>(kFrameSamples));
         volc_audio_frame_info_t frame = {
             .data_type = VOLC_AUDIO_DATA_TYPE_PCM,
             .commit = false,
         };
         volc_send_audio_data(impl_->engine, pcm.data(), count * sizeof(int16_t), &frame);
+#endif
     }
 
     impl_->input_task = nullptr;
@@ -434,8 +614,9 @@ void VoiceService::Stop() {
         vTaskDelay(pdMS_TO_TICKS(20));
     }
     impl_->CloseOutputResampler();
+    impl_->CloseCloudCodec();
     impl_->ClosePlaybackStream();
-    ESP_LOGI(kTag, "Volcano low-load intercom stopped");
+    ESP_LOGI(kTag, "Volcano %s intercom stopped", kTransportName);
 }
 
 }  // namespace argus

@@ -1,0 +1,12 @@
+# Experimental partition table for the Volcano high-quality RTC build.
+# RTC Lite needs approximately 205 KiB more than the low-load build. To keep
+# both OTA slots large enough on the 16 MB flash, this test layout reduces the
+# local face database partition by 512 KiB. Do not use it for production yet.
+# Name,   Type, SubType, Offset,    Size,     Flags
+nvs,      data, nvs,     0x9000,    0x4000,
+otadata,  data, ota,     0xd000,    0x2000,
+phy_init, data, phy,     0xf000,    0x1000,
+ota_0,    app,  ota_0,   0x20000,   0x6a0000,
+ota_1,    app,  ota_1,   0x6c0000,  0x6a0000,
+assets,   data, spiffs,  0xd60000,  0x1c0000,
+argus,    data, spiffs,  0xf20000,  0xd0000,

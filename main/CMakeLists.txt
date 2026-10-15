@@ -1143,6 +1143,7 @@ if(ARGUS_SELECTED_BOARD_NAME STREQUAL "argus-k10" OR CONFIG_BOARD_TYPE_ARGUS_K10
         espressif__human_face_recognition
         espressif__esp_audio_effects
         espressif__cjson
+        espressif__zlib
         lwip
         esp_hw_support
         esp_rom
@@ -1152,18 +1153,29 @@ if(CONFIG_BOARD_TYPE_ARGUS_K10)
     set(ARGUS_VOLC_ROOT
         "${CMAKE_CURRENT_SOURCE_DIR}/../third_party/ConversationalAI-Embedded-Kit-2.0/volc_conv_ai")
     include("${ARGUS_VOLC_ROOT}/cmake/common.cmake")
+    set(ARGUS_VOLC_TRANSPORT_SRCS "")
+    set(ARGUS_VOLC_TRANSPORT_INCS "")
+    if(CONFIG_VOLC_WS_MODE)
+        list(APPEND ARGUS_VOLC_TRANSPORT_SRCS ${VOLC_CONV_AI_LOW_LOAD_SRCS})
+        list(APPEND ARGUS_VOLC_TRANSPORT_INCS ${VOLC_CONV_AI_LOW_LOAD_INCS})
+    elseif(CONFIG_VOLC_RTC_MODE)
+        list(APPEND ARGUS_VOLC_TRANSPORT_SRCS ${VOLC_CONV_AI_HIGH_QUALITY_SRCS})
+        list(APPEND ARGUS_VOLC_TRANSPORT_INCS ${VOLC_CONV_AI_HIGH_QUALITY_INCS})
+    else()
+        message(FATAL_ERROR "Argus K10 requires a Volcano transport")
+    endif()
     list(APPEND SOURCES
         "boards/argus/face/src/argus_face_attendance.cc"
         "boards/argus/voice/src/argus_voice_service.cc"
         "${ARGUS_VOLC_ROOT}/osal/src/espressif/volc_osal.c"
         ${VOLC_CONV_AI_SRCS}
-        ${VOLC_CONV_AI_LOW_LOAD_SRCS}
+        ${ARGUS_VOLC_TRANSPORT_SRCS}
     )
     list(APPEND INCLUDE_DIRS
         "boards/argus/face/include"
         "boards/argus/voice/include"
         ${VOLC_CONV_AI_INCS}
-        ${VOLC_CONV_AI_LOW_LOAD_INCS}
+        ${ARGUS_VOLC_TRANSPORT_INCS}
         ${VOLC_CONV_AI_PLATFORM_INCS}
     )
 endif()
@@ -1198,9 +1210,18 @@ idf_component_register(SRCS ${SOURCES}
                     )
 
 if(CONFIG_BOARD_TYPE_ARGUS_K10)
-    set_source_files_properties(${VOLC_CONV_AI_SRCS} ${VOLC_CONV_AI_LOW_LOAD_SRCS}
+    set_source_files_properties(${VOLC_CONV_AI_SRCS} ${ARGUS_VOLC_TRANSPORT_SRCS}
         PROPERTIES COMPILE_OPTIONS "-w")
-    target_compile_definitions(${COMPONENT_LIB} PRIVATE ENABLE_WS_MODE)
+    if(CONFIG_VOLC_WS_MODE)
+        target_compile_definitions(${COMPONENT_LIB} PRIVATE ENABLE_WS_MODE)
+    elseif(CONFIG_VOLC_RTC_MODE)
+        target_compile_definitions(${COMPONENT_LIB} PRIVATE ENABLE_RTC_MODE)
+        add_prebuilt_library(
+            volc_engine_rtc_lite
+            "${ARGUS_VOLC_ROOT}/src/transports/high_quality/third_party/volc_rtc_engine_lite/libs/${IDF_TARGET}/libVolcEngineRTCLite.a"
+            REQUIRES mbedtls espressif__zlib espressif__cjson lwip)
+        target_link_libraries(${COMPONENT_LIB} PRIVATE volc_engine_rtc_lite)
+    endif()
 endif()
 
 # Keep project-owned C++ on GNU C++23. ESP-IDF 6 may default to a newer
